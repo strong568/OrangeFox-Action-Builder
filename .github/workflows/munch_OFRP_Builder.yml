@@ -1,0 +1,173 @@
+name: 🦊 OrangeFox for munch - 构建
+
+on:
+  workflow_dispatch:
+    inputs:
+      # 基础配置 (5个)
+      MANIFEST_BRANCH:
+        description: 'OrangeFox源码分支'
+        required: true
+        default: '12.1'
+        type: choice
+        options:
+        - 12.1
+        - 14.1
+      DEVICE_TREE:
+        description: '设备树仓库'
+        required: true
+        default: 'https://github.com/Pranav-Talmale/recovery_device_xiaomi_munch#fox_12.1'
+      KERNEL_SOURCE:
+        description: '内核源码 (格式: URL#分支)'
+        required: true
+        default: 'https://github.com/liyafe1997/kernel_xiaomi_sm8250_mod#android15-lineage22-mod'
+      DEVICE_NAME:
+        description: '设备代号'
+        required: true
+        default: 'munch'
+      BUILD_TARGET:
+        description: '构建目标'
+        required: true
+        default: 'boot'
+        type: choice
+        options:
+        - boot
+        - recovery
+        - vendorboot
+      KERNEL_NAME:
+        description: '内核版本后缀 (如: -Custom)'
+        required: false
+        default: '-Nijika-v2.0-SukiSU'
+      MAGISK_VERSION:
+        description: 'Magisk版本'
+        required: true
+        default: 'MagiskAlpha'
+        type: choice
+        options:
+        - Magisk
+        - MagiskAlpha
+        - MagiskDelta
+      # 高级配置 (1个)
+      OF_MAINTAINER:
+        description: '维护者名称'
+        required: true
+        default: 'AviderMin'
+
+env:
+  DEVICE_PATH: device/xiaomi/${{ inputs.DEVICE_NAME }}
+  KERNEL_DIR: kernel/xiaomi/${{ inputs.DEVICE_NAME }}
+  CLANG_DIR: prebuilts/clang/host/linux-x86/clang-13.0.0
+
+jobs:
+  build:
+    name: 🏗️ 构建 OrangeFox by ${{ github.actor }}
+    runs-on: ubuntu-latest
+    steps:
+    - name: 🛒 检出代码
+      uses: actions/checkout@v4
+              
+    - name: 🧹 清理空间
+      uses: rokibhasansagar/slimhub_actions@main
+
+    - name: 💾 设置交换空间
+      uses: pierotofy/set-swap-space@master
+      with:
+        swap-size-gb: 24
+      
+    - name: 🛠️ 构建环境
+      run: |
+        sudo apt update
+        sudo apt install -y aria2 git-lfs
+        git clone https://gitlab.com/OrangeFox/misc/scripts.git -b master
+        cd scripts
+        sudo bash setup/android_build_env.sh
+      
+    - name: 📜 建立清单
+      run: |
+        mkdir -p ${GITHUB_WORKSPACE}/OrangeFox
+        cd ${GITHUB_WORKSPACE}/OrangeFox
+        git config --global user.name "${{ github.actor }}"
+        git config --global user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
+        git clone https://gitlab.com/OrangeFox/sync.git -b master
+        cd sync
+        ./orangefox_sync.sh --branch ${{ inputs.MANIFEST_BRANCH }} --path ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ inputs.MANIFEST_BRANCH }}
+    
+    - name: 📥 克隆源码
+      run: |
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ inputs.MANIFEST_BRANCH }}
+
+        # 解析设备树
+        DEVICE_TREE="${{ inputs.DEVICE_TREE }}"
+        DEVICE_TREE_URL=${DEVICE_TREE%#*}
+        DEVICE_TREE_BRANCH=${DEVICE_TREE#*#}
+        git clone ${DEVICE_TREE_URL} -b ${DEVICE_TREE_BRANCH} ${DEVICE_PATH}
+
+        # 解析内核
+        KERNEL_SOURCE="${{ inputs.KERNEL_SOURCE }}"
+        KERNEL_URL=${KERNEL_SOURCE%#*}
+        KERNEL_BRANCH=${KERNEL_SOURCE#*#}
+        git clone ${KERNEL_URL} -b ${KERNEL_BRANCH} --depth=1 ${KERNEL_DIR}
+
+        # 克隆编译工具链
+        git clone https://github.com/kdrag0n/proton-clang --depth=1 ${CLANG_DIR}
+
+        cd ${DEVICE_PATH}
+        echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
+
+    - name: ✏️ 修改源码
+      if: inputs.KERNEL_NAME != ''
+      run: |
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ inputs.MANIFEST_BRANCH }}/${DEVICE_PATH}
+        if [ -f BoardConfig.mk ]; then
+          if grep -q "TARGET_KERNEL_VERSION" BoardConfig.mk; then
+            sed -i "s|TARGET_KERNEL_VERSION := .*|TARGET_KERNEL_VERSION := ${{ inputs.KERNEL_NAME }}|" BoardConfig.mk
+          else
+            echo -e "\nTARGET_KERNEL_VERSION := ${{ inputs.KERNEL_NAME }}" >> BoardConfig.mk
+          fi
+          echo "Set TARGET_KERNEL_VERSION to ${{ inputs.KERNEL_NAME }}"
+        else
+          echo "BoardConfig.mk not found!"
+        fi
+    
+    - name: ⚡ 更新 OrangeFox 的内置 Magisk
+      run: |
+        git clone https://github.com/ymdzq/twrp_prebuilt ~/twrp_prebuilt
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ inputs.MANIFEST_BRANCH }}/${DEVICE_PATH}
+        if ! grep -q 'FOX_USE_SPECIFIC_MAGISK_ZIP' vendorsetup.sh; then 
+          echo -e '\nexport FOX_USE_SPECIFIC_MAGISK_ZIP=~/twrp_prebuilt/Magisk/${{ inputs.MAGISK_VERSION }}.apk' >> vendorsetup.sh
+        else 
+          sed -i "s|export FOX_USE_SPECIFIC_MAGISK_ZIP=.*|export FOX_USE_SPECIFIC_MAGISK_ZIP=~/twrp_prebuilt/Magisk/${{ inputs.MAGISK_VERSION }}.apk|" vendorsetup.sh
+        fi
+    
+    - name: 🔨 构建 OrangeFox
+      run: |
+        cd ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ inputs.MANIFEST_BRANCH }}
+        source build/envsetup.sh
+        export ALLOW_MISSING_DEPENDENCIES=true
+        export OF_MAINTAINER="${{ inputs.OF_MAINTAINER }}"
+        export FOX_USE_NANO_EDITOR=1
+        export LC_ALL="C"
+        export FOX_BUILD_DEVICE=munch
+        lunch twrp_${{ inputs.DEVICE_NAME }}-eng
+        make clean
+        mka adbd ${{ inputs.BUILD_TARGET }}image
+    
+    - name: 🏷️ 设置发布属性
+      run: |
+        echo "BUILD_DATE=$(date +%Y%m%d)" >> $GITHUB_ENV
+        echo "RELEASE_NAME=OrangeFox-${{ inputs.MANIFEST_BRANCH }}-${{ env.BUILD_DATE }}" >> $GITHUB_ENV
+    
+    - name: 🚀 上传至 Release
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ inputs.MANIFEST_BRANCH }}/out/target/product/${{ inputs.DEVICE_NAME }}/OrangeFox-*.zip
+          ${GITHUB_WORKSPACE}/OrangeFox/fox_${{ inputs.MANIFEST_BRANCH }}/out/target/product/${{ inputs.DEVICE_NAME }}/OrangeFox-*.img
+        name: ${{ env.RELEASE_NAME }}
+        tag_name: build-${{ env.BUILD_DATE }}
+        body: |
+          ### OrangeFox Recovery for ${{ inputs.DEVICE_NAME }}
+          **Build Date:** ${{ env.BUILD_DATE }}  
+          **Manifest Branch:** ${{ inputs.MANIFEST_BRANCH }}  
+          **Device Tree:** [${{ inputs.DEVICE_TREE }}](${inputs.DEVICE_TREE%#*})  
+          **Kernel:** [${{ inputs.KERNEL_SOURCE }}](${inputs.KERNEL_SOURCE%#*})  
+          **Maintainer:** ${{ inputs.OF_MAINTAINER }}
