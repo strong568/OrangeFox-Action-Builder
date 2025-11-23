@@ -48,9 +48,9 @@ on:
         - MagiskDelta
       # 高级配置 (1个)
       OF_MAINTAINER:
-        description: '维护者名称'
+        description: 'maintainer'
         required: true
-        default: 'AviderMin'
+        default: 'Grass2000'
 
 env:
   DEVICE_PATH: device/xiaomi/${{ inputs.DEVICE_NAME }}
