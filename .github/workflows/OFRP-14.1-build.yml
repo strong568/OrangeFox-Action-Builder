@@ -6,19 +6,19 @@ on:
       DEVICE_TREE_URL:
         description: "Device tree url"
         required: true
-        default: "https://github.com/adontoo/twrp_device_oplus_sm86xx"
+        default: "https://github.com/adontoo/device_xiaomi_sm8750_OFRP"
       DEVICE_TREE_BRANCH:
         description: "Device tree branch"
         required: true
-        default: "twrp-16.0"
+        default: "fox_14.1"
       DEVICE_PATH:
         description: "Device path device/"
         required: true
-        default: "device/oplus/sm86xx"
+        default: "xiaomi/sm8750_thales"
       DEVICE_NAME:
         description: "Device name"
         required: true
-        default: "sm86xx"
+        default: "sm8750_thales"
       LUNCH_TARGET:
         description: "lunch twrp_ (default same as device name)"
         required: false
